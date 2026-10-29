@@ -2,5 +2,4 @@
 *.tmp
 *.zip
 .DS_Store
-/Defender开关说明.txt
 /Bin/Windows Defender *.xml
