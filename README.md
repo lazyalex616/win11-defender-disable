@@ -1,6 +1,6 @@
 # Win11 Defender Disable
 
-A portable Microsoft Defender switch for Windows 10/11, using Windows PowerShell 5.1 and superUser 6.2.
+A portable Microsoft Defender switch for x64 Windows 10/11, with defendnot 1.6.0 and superUser 6.2.
 
 [简体中文](README.zh-CN.md) · [Discussions](https://github.com/lazyalex616/win11-defender-disable/discussions)
 
@@ -10,18 +10,20 @@ A portable Microsoft Defender switch for Windows 10/11, using Windows PowerShell
 ## Usage
 
 1. Extract the complete archive. Release archive password: `defender`.
-2. Run `关闭Defender.CMD` to disable or `启用Defender.CMD` to enable.
-3. Accept the administrator prompt and read the result.
+2. Turn off Tamper Protection in Windows Security before disabling Defender.
+3. Run `Disable-Defender.cmd` to disable or `Enable-Defender.cmd` to enable.
+4. Accept the administrator prompt and read the result.
 
 Exit codes: `0` verified, `1` incomplete, `2` error. No automatic reboot.
 
 ## Scope and limits
 
-- Changes Defender monitoring settings, existing scan tasks, security services and tray startup.
-- Protected services and tamper protection can block changes. Full engine shutdown is not guaranteed.
+- Disable installs the bundled defendnot in `%ProgramFiles%\defendnot`, registers a virtual antivirus and adds its SYSTEM boot task. It also disables existing Defender scan tasks and hides the security tray.
+- `wscsvc` stays running: Windows Security Center is required for the antivirus registration; it is not the scanning engine.
+- Enable unregisters defendnot, removes its boot task and restores Defender settings and tray startup. The tray returns at the next sign-in.
 - Does not remove Defender components, change firewall settings, or automatically disable tamper protection.
-- **defendnot is not integrated or bundled.** This release is the standalone script, not a one-click defendnot installer. Do not run it over an existing defendnot setup: it disables `wscsvc`, which defendnot requires.
-- Enable does not undo legacy-script changes or unregister third-party antivirus products. The tray returns at the next sign-in.
+- Keep `%ProgramFiles%\defendnot` while disabled. Windows updates may restore Defender. No reboot-persistence guarantee is claimed.
+- Does not undo unrelated legacy-script changes or remove other antivirus products. Security health services can remain running; success means the Defender scanning engine is inactive, not every security component has been removed.
 
 ## Checks
 
@@ -33,5 +35,5 @@ These are static and isolated checks, not a live antivirus-disable test.
 
 ## License
 
-New code: [MIT](LICENSE). Unmodified [superUser 6.2](https://github.com/mspaintmsi/superUser/releases/tag/v6.2) binaries: [Apache-2.0](LICENSE-superUser.txt).
+New code: [MIT](LICENSE). Unmodified [superUser 6.2](https://github.com/mspaintmsi/superUser/releases/tag/v6.2) and [defendnot 1.6.0](https://github.com/es3n1n/defendnot/releases/tag/v1.6.0) binaries: Apache-2.0 ([superUser license](LICENSE-superUser.txt), [defendnot license](LICENSE-defendnot.txt)).
 Legacy local XML files are not used or distributed.

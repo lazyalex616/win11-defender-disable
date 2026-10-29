@@ -16,6 +16,56 @@ $preferences = @('DisableRealtimeMonitoring', 'DisableBehaviorMonitoring',
     'DisableIOAVProtection', 'DisableScriptScanning')
 $services = [ordered]@{ WinDefend = 'Automatic'; MDCoreSvc = 'Automatic'; WdNisSvc = 'Manual'; SecurityHealthService = 'Manual'; wscsvc = 'Automatic' }
 $trayPolicy = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender Security Center\Systray'
+$defendnotPath = Join-Path $env:ProgramFiles 'defendnot'
+$defendnotHashes = @{
+    'defendnot-loader.exe' = 'F57A4DD3BD3CE82EAF6D7143E837B3FA59A0ACCDAC76FD3DC053433EFDD50E5E'
+    'defendnot.dll' = 'B0870E105C7AD37FB0BDCB9305279B2943810D55300E8721EB64BDAA588CC84E'
+}
+
+function Invoke-Defendnot {
+    param([bool]$Disabling)
+    Set-Service wscsvc -StartupType Automatic
+    Start-Service wscsvc
+    if ($Disabling) {
+        $null = [IO.Directory]::CreateDirectory($defendnotPath)
+        foreach ($name in $defendnotHashes.Keys) {
+            $source = Join-Path $PSScriptRoot ('defendnot\' + $name)
+            if ((Get-FileHash $source).Hash -ne $defendnotHashes[$name]) { throw ('Bundled checksum: ' + $name) }
+            $target = Join-Path $defendnotPath $name
+            if ((Test-Path $target) -and (Get-FileHash $target).Hash -ne $defendnotHashes[$name]) {
+                throw ('Different defendnot installation found: ' + $target)
+            }
+            if (-not (Test-Path $target)) {
+                Copy-Item -LiteralPath $source -Destination $target -Force
+            }
+        }
+    } elseif (-not (Test-Path (Join-Path $defendnotPath 'defendnot-loader.exe'))) {
+        return
+    }
+    foreach ($name in $defendnotHashes.Keys) {
+        if ((Get-FileHash (Join-Path $defendnotPath $name)).Hash -ne $defendnotHashes[$name]) {
+            throw ('Installed defendnot checksum: ' + $name)
+        }
+    }
+    $arguments = if ($Disabling) { '--silent' } else { '--silent --disable' }
+    $start = [Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = Join-Path $defendnotPath 'defendnot-loader.exe'
+    $start.Arguments = $arguments
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $process = [Diagnostics.Process]::Start($start)
+    $output = $process.StandardOutput.ReadToEndAsync()
+    $errorOutput = $process.StandardError.ReadToEndAsync()
+    if (-not $process.WaitForExit(60000)) {
+        $process.Kill()
+        throw 'defendnot timed out; inspect actual state before retrying.'
+    }
+    if ($process.ExitCode -ne 0 -or $output.Result -notmatch 'success: true') {
+        throw ('defendnot failed: ' + $output.Result + $errorOutput.Result)
+    }
+}
 
 function Set-TrayVisibility {
     param([bool]$Hidden)
@@ -74,8 +124,9 @@ function Invoke-Change {
 function Get-StateIssues {
     param([bool]$Disabling)
     $status = Get-MpComputerStatus
-    $settings = Get-MpPreference
+    $settings = if (-not $Disabling) { Get-MpPreference -ErrorAction Stop } else { $null }
     foreach ($name in $preferences) {
+        if ($Disabling) { continue }
         if ($settings.$name -ne $Disabling) { 'Preference: ' + $name }
     }
     # Network inspection can be idle while enabled, so it is not an enable criterion.
@@ -88,8 +139,9 @@ function Get-StateIssues {
         $service = Get-Service -Name $name -ErrorAction SilentlyContinue
         if ($null -eq $service) { continue }
         if ($Disabling) {
-            if ($service.Status -ne 'Stopped' -or $service.StartType -ne 'Disabled') {
-                'Service still enabled: ' + $name
+            if ($name -in @('wscsvc', 'SecurityHealthService')) { continue }
+            if ($service.Status -ne 'Stopped') {
+                'Service still running: ' + $name
             }
         } else {
             if ([string]$service.StartType -ne $services[$name]) { 'Service startup: ' + $name }
@@ -101,12 +153,21 @@ function Get-StateIssues {
     foreach ($name in $taskNames) {
         $task = Get-ScheduledTask -TaskPath $taskPath -TaskName $name -ErrorAction SilentlyContinue
         if ($null -eq $task) {
-            if (-not $Disabling) { 'Scheduled task missing: ' + $name }
+            # Windows removes scan tasks while another antivirus is registered.
+            # Missing tasks do not by themselves prove protection failed to start.
         } elseif ([bool]$task.Settings.Enabled -ne (-not $Disabling)) {
             'Scheduled task: ' + $name
         }
     }
     if ($Disabling) {
+        if ($status.AMServiceEnabled -or $status.AntivirusEnabled -or $status.AMRunningMode -ne 'Not running') {
+            'Defender engine is not inactive'
+        }
+        $products = @(Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntiVirusProduct)
+        if (-not ($products | Where-Object { $_.displayName -eq 'dnot.sh' })) { 'defendnot registration missing' }
+        $autorun = Get-ScheduledTask -TaskName defendnot -ErrorAction SilentlyContinue
+        if ($null -eq $autorun -or -not $autorun.Settings.Enabled) { 'defendnot autorun missing or disabled' }
+        if ((Get-Service wscsvc).Status -ne 'Running') { 'Required security-center service is not running' }
         if (Get-Process SecurityHealthSystray -ErrorAction SilentlyContinue) { 'Tray process still running' }
         if ((Get-ItemProperty -Path $trayPolicy -Name HideSystray -ErrorAction SilentlyContinue).HideSystray -ne 1) {
             'Tray hiding policy is not enabled'
@@ -114,11 +175,10 @@ function Get-StateIssues {
     }
     if (-not $Disabling) {
         if (-not $status.AMServiceEnabled -or -not $status.AntivirusEnabled) { 'Antivirus is not active' }
-        # Older versions deleted these registrations. Do not invent version-specific repair data.
-        $key = 'HKLM:\SOFTWARE\Microsoft\AMSI\Providers\{2781761E-28E0-4109-99FE-B9D127C57AFE}'
-        if (-not (Test-Path -LiteralPath $key)) {
-            'Defender AMSI registration missing; Windows component repair is required'
-        }
+        $products = @(Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntiVirusProduct)
+        if ($products | Where-Object { $_.displayName -eq 'dnot.sh' }) { 'defendnot registration still present' }
+        $autorun = Get-ScheduledTask -TaskName defendnot -ErrorAction SilentlyContinue
+        if ($null -ne $autorun -and $autorun.Settings.Enabled) { 'defendnot autorun still enabled' }
     }
 }
 
@@ -155,10 +215,18 @@ try {
         throw 'Microsoft Defender PowerShell commands are unavailable.'
     }
     $disabling = $Mode -eq 'Disable'
+    if (-not [Environment]::Is64BitOperatingSystem -or $env:PROCESSOR_ARCHITECTURE -eq 'ARM64') {
+        throw 'The integrated defendnot package currently supports x64 Windows only.'
+    }
+    if ($disabling -and (Get-MpComputerStatus).IsTamperProtected) {
+        throw 'Turn off tamper protection in Windows Security before disabling Defender.'
+    }
     if ((Get-MpComputerStatus).IsTamperProtected) {
         Write-Host 'WARN: Tamper protection is enabled. Windows may reject changes.' -ForegroundColor Yellow
     }
 
+    # WSC must remain available for both registration and unregistration.
+    if (-not $disabling) { Invoke-Defendnot -Disabling $false }
     # Restore services before asking Defender to enable protection.
     if (-not $disabling) {
         foreach ($name in $services.Keys) {
@@ -172,6 +240,7 @@ try {
         }
     }
     foreach ($name in $preferences) {
+        if ($disabling -and -not (Get-MpComputerStatus).AMServiceEnabled) { break }
         Invoke-Change $name {
             $parameters = @{ ErrorAction = 'Stop' }
             $parameters[$name] = $disabling
@@ -188,18 +257,17 @@ try {
     }
     Invoke-Change 'Windows Security tray' { Set-TrayVisibility -Hidden $disabling }
     if ($disabling) {
-        foreach ($name in $services.Keys) {
-            if ($null -eq (Get-Service -Name $name -ErrorAction SilentlyContinue)) { continue }
-            Invoke-Change ($name + ' startup') { Set-Service -Name $name -StartupType Disabled }
-            Invoke-Change ($name + ' stop') {
-                # sc returns immediately; Stop-Service can wait indefinitely on a protected service.
-                & "$env:SystemRoot\System32\sc.exe" stop $name | Out-Host
-                if ($LASTEXITCODE -ne 0 -and (Get-Service $name).Status -ne 'Stopped') {
-                    throw ('Service stop rejected: ' + $name)
-                }
-            }
-        }
+        Invoke-Defendnot -Disabling $true
     }
+    $deadline = [DateTime]::UtcNow.AddSeconds(30)
+    do {
+        $status = Get-MpComputerStatus
+        $runningEngines = @(Get-Service WinDefend, MDCoreSvc, WdNisSvc -ErrorAction SilentlyContinue |
+            Where-Object { $_.Status -ne 'Stopped' })
+        if ($disabling -and -not $status.AMServiceEnabled -and -not $status.AntivirusEnabled -and $runningEngines.Count -eq 0) { break }
+        if (-not $disabling -and $status.AntivirusEnabled -and $status.RealTimeProtectionEnabled) { break }
+        Start-Sleep -Seconds 1
+    } while ([DateTime]::UtcNow -lt $deadline)
     $issues = @(Get-StateIssues -Disabling $disabling)
     if ($issues.Count) {
         foreach ($issue in $issues) { Write-Host ('INCOMPLETE: ' + $issue) -ForegroundColor Yellow }

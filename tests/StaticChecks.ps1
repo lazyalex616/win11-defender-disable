@@ -15,6 +15,8 @@ if ($text -notmatch 'exit \$LASTEXITCODE') { throw 'Child exit code is not propa
 $hashes = @{
     'superUser32.exe' = 'CDAAD2BA1C179C43A079D7F82C11B44FF6BD476CC209C8D20F3035134F6A2A8A'
     'superUser64.exe' = 'D077F8B5448EF64CB1DE5777B38996B09B99A4F0FDE002503E8839B72BDC394F'
+    'defendnot\defendnot-loader.exe' = 'F57A4DD3BD3CE82EAF6D7143E837B3FA59A0ACCDAC76FD3DC053433EFDD50E5E'
+    'defendnot\defendnot.dll' = 'B0870E105C7AD37FB0BDCB9305279B2943810D55300E8721EB64BDAA588CC84E'
 }
 foreach ($name in $hashes.Keys) {
     if ((Get-FileHash (Join-Path $root ('Bin\' + $name))).Hash -ne $hashes[$name]) { throw ('Checksum: ' + $name) }
@@ -38,15 +40,24 @@ function Get-MpComputerStatus { [pscustomobject]@{
     RealTimeProtectionEnabled = $script:active
     AMServiceEnabled = $script:active
     AntivirusEnabled = $script:active
+    AMRunningMode = $(if ($script:active) { 'Normal' } else { 'Not running' })
 } }
 function Get-MpPreference { [pscustomobject]@{ DisableRealtimeMonitoring = -not $script:active } }
 function Get-Service { param($Name, $ErrorAction)
+    if ($Name -eq 'wscsvc') { return [pscustomobject]@{Status='Running';StartType='Automatic'} }
     [pscustomobject]@{ Status = $script:serviceStatus; StartType = $script:serviceStart }
 }
 function Get-ScheduledTask { param($TaskPath, $TaskName, $ErrorAction)
+    if ($TaskName -eq 'defendnot') {
+        if (-not $script:active) { return [pscustomobject]@{Settings=@{Enabled=$true}} }
+        return
+    }
     if (-not $script:missingTask) { [pscustomobject]@{ Settings = @{ Enabled = $script:active } } }
 }
 function Test-Path { param($LiteralPath) return $true }
+function Get-CimInstance { param($Namespace, $ClassName)
+    if (-not $script:active) { [pscustomobject]@{displayName='dnot.sh'} }
+}
 function Get-Item { param($LiteralPath)
     $item = [pscustomobject]@{}
     $item | Add-Member ScriptMethod GetValue { param($name) 'Defender' }
@@ -61,7 +72,7 @@ $script:serviceStart = 'Disabled'
 $script:missingTask = $false
 if (@(Get-StateIssues -Disabling $true).Count) { throw 'Fully disabled state was rejected' }
 $script:serviceStatus = 'Running'
-if (@(Get-StateIssues -Disabling $true) -notcontains 'Service still enabled: WinDefend') {
+if (@(Get-StateIssues -Disabling $true) -notcontains 'Service still running: WinDefend') {
     throw 'Protected engine incorrectly reported as disabled'
 }
 $script:active = $true
@@ -74,7 +85,5 @@ function Get-Item { param($LiteralPath)
 }
 if (@(Get-StateIssues -Disabling $false).Count) { throw 'Empty AMSI display name is not proof of damage' }
 $script:missingTask = $true
-if (@(Get-StateIssues -Disabling $false) -notcontains 'Scheduled task missing: Windows Defender Scheduled Scan') {
-    throw 'Missing scan task incorrectly reported as restored'
-}
+if (@(Get-StateIssues -Disabling $false).Count) { throw 'Windows-managed missing task incorrectly treated as inactive antivirus' }
 'PASS: syntax, launcher contracts, binary checksums and isolated state-verification cases. No OS settings changed.'
