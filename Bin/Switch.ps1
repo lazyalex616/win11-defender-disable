@@ -14,7 +14,50 @@ $taskNames = @('Windows Defender Cache Maintenance', 'Windows Defender Cleanup',
     'Windows Defender Scheduled Scan', 'Windows Defender Verification')
 $preferences = @('DisableRealtimeMonitoring', 'DisableBehaviorMonitoring',
     'DisableIOAVProtection', 'DisableScriptScanning')
-$services = [ordered]@{ WinDefend = 'Automatic'; MDCoreSvc = 'Automatic'; WdNisSvc = 'Manual' }
+$services = [ordered]@{ WinDefend = 'Automatic'; MDCoreSvc = 'Automatic'; WdNisSvc = 'Manual'; SecurityHealthService = 'Manual'; wscsvc = 'Automatic' }
+$trayPolicy = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender Security Center\Systray'
+
+function Set-TrayVisibility {
+    param([bool]$Hidden)
+    if ($Hidden) {
+        $null = New-Item -Path $trayPolicy -Force
+        $null = New-ItemProperty -Path $trayPolicy -Name HideSystray -Value 1 -PropertyType DWord -Force
+        # Ask the shell to remove the icon before terminating its owner.
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class DefenderTray {
+    [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)]
+    public struct Data {
+        public uint Size; public IntPtr Window; public uint Id, Flags, Callback;
+        public IntPtr Icon;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst=128)] public string Tip;
+        public uint State, StateMask;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst=256)] public string Info;
+        public uint Timeout;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst=64)] public string Title;
+        public uint InfoFlags; public Guid Guid; public IntPtr Balloon;
+    }
+    [DllImport("shell32.dll", CharSet=CharSet.Unicode)]
+    public static extern bool Shell_NotifyIcon(uint action, ref Data data);
+    public static bool Remove() {
+        var data=new Data(); data.Size=(uint)Marshal.SizeOf(data);
+        data.Flags=0x20; data.Guid=new Guid("BA82E2DC-F405-47AD-B032-CF0FAA0E3933");
+        return Shell_NotifyIcon(2,ref data);
+    }
+}
+'@
+        if (-not [DefenderTray]::Remove()) {
+            Write-Host 'WARN: Shell did not confirm tray-icon removal in this session.' -ForegroundColor Yellow
+        }
+        Remove-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' -Name SecurityHealth -ErrorAction SilentlyContinue
+        Get-Process -Name SecurityHealthSystray -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction Stop
+    } else {
+        if (Test-Path $trayPolicy) { Remove-ItemProperty -Path $trayPolicy -Name HideSystray -ErrorAction SilentlyContinue }
+        $null = New-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' -Name SecurityHealth -PropertyType ExpandString -Value '%windir%\system32\SecurityHealthSystray.exe' -Force
+        # The next interactive sign-in starts the tray in the correct user session.
+    }
+}
 
 function Test-Administrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -61,6 +104,12 @@ function Get-StateIssues {
             if (-not $Disabling) { 'Scheduled task missing: ' + $name }
         } elseif ([bool]$task.Settings.Enabled -ne (-not $Disabling)) {
             'Scheduled task: ' + $name
+        }
+    }
+    if ($Disabling) {
+        if (Get-Process SecurityHealthSystray -ErrorAction SilentlyContinue) { 'Tray process still running' }
+        if ((Get-ItemProperty -Path $trayPolicy -Name HideSystray -ErrorAction SilentlyContinue).HideSystray -ne 1) {
+            'Tray hiding policy is not enabled'
         }
     }
     if (-not $Disabling) {
@@ -137,11 +186,18 @@ try {
             else { $task | Enable-ScheduledTask | Out-Null }
         }
     }
+    Invoke-Change 'Windows Security tray' { Set-TrayVisibility -Hidden $disabling }
     if ($disabling) {
         foreach ($name in $services.Keys) {
             if ($null -eq (Get-Service -Name $name -ErrorAction SilentlyContinue)) { continue }
             Invoke-Change ($name + ' startup') { Set-Service -Name $name -StartupType Disabled }
-            Invoke-Change ($name + ' stop') { Stop-Service -Name $name }
+            Invoke-Change ($name + ' stop') {
+                # sc returns immediately; Stop-Service can wait indefinitely on a protected service.
+                & "$env:SystemRoot\System32\sc.exe" stop $name | Out-Host
+                if ($LASTEXITCODE -ne 0 -and (Get-Service $name).Status -ne 'Stopped') {
+                    throw ('Service stop rejected: ' + $name)
+                }
+            }
         }
     }
     $issues = @(Get-StateIssues -Disabling $disabling)

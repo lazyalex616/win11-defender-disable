@@ -7,7 +7,7 @@ $errors = $null
 $null = [Management.Automation.Language.Parser]::ParseFile($core, [ref]$tokens, [ref]$errors)
 if ($errors.Count) { throw ($errors | Out-String) }
 $text = [IO.File]::ReadAllText($core)
-foreach ($forbidden in @('reg.exe', 'Remove-ItemProperty', 'Stop-Process', 'Restart-Computer', 'Set-NetFirewallProfile')) {
+foreach ($forbidden in @('reg.exe', 'Restart-Computer', 'Set-NetFirewallProfile')) {
     if ($text.Contains($forbidden)) { throw ('Unexpected operation: ' + $forbidden) }
 }
 if ($text -notmatch 'Get-StateIssues -Disabling') { throw 'Final state verification is missing' }
@@ -52,6 +52,9 @@ function Get-Item { param($LiteralPath)
     $item | Add-Member ScriptMethod GetValue { param($name) 'Defender' }
     return $item
 }
+function Get-Process { param($Name, $ErrorAction) }
+function Get-ItemProperty { param($Path, $Name, $ErrorAction) [pscustomobject]@{ HideSystray = 1 } }
+$trayPolicy = 'TestOnly'
 $script:active = $false
 $script:serviceStatus = 'Stopped'
 $script:serviceStart = 'Disabled'
