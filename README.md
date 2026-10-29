@@ -4,6 +4,9 @@ A portable Microsoft Defender switch for Windows 10/11, using Windows PowerShell
 
 [简体中文](README.zh-CN.md) · [Discussions](https://github.com/lazyalex616/win11-defender-disable/discussions)
 
+> [!IMPORTANT]
+> **7z archive password: `defender`**
+
 ## Usage
 
 1. Extract the complete archive. Release archive password: `defender`.

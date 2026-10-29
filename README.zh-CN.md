@@ -4,6 +4,9 @@
 
 [English](README.md) · [讨论区](https://github.com/lazyalex616/win11-defender-disable/discussions)
 
+> [!IMPORTANT]
+> **7z 压缩包解压密码：`defender`**
+
 ## 使用
 
 1. 完整解压发布包，密码：`defender`。
