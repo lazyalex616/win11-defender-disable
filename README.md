@@ -2,7 +2,7 @@
 
 A portable Microsoft Defender switch for x64 Windows 10/11, with defendnot 1.6.0 and superUser 6.2.
 
-[简体中文](README.zh-CN.md) · [Discussions](https://github.com/lazyalex616/win11-defender-disable/discussions)
+[简体中文](README.zh-CN.md)
 
 > [!IMPORTANT]
 > **7z archive password: `defender`**

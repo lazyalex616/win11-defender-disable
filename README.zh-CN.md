@@ -2,7 +2,7 @@
 
 适用于 x64 Windows 10/11 的便携 Defender 开关，内置 defendnot 1.6.0 和 superUser 6.2。
 
-[English](README.md) · [讨论区](https://github.com/lazyalex616/win11-defender-disable/discussions)
+[English](README.md)
 
 > [!IMPORTANT]
 > **7z 压缩包解压密码：`defender`**
