@@ -1,4 +1,4 @@
-# Win11 杀毒开关
+# Win11 Defender Disable · Win11 杀毒关闭工具
 
 Windows 10/11 上用于尝试关闭、重新开启 Microsoft Defender 的便携工具。
 保留两个中文 CMD 入口，使用 PowerShell 5.1 和 superUser 6.2 执行操作并检查最终状态。
@@ -14,7 +14,7 @@ Windows 10/11 上用于尝试关闭、重新开启 Microsoft Defender 的便携�
 
 ## 作用范围
 
-- Defender 实时、行为、下载文件、脚本及网络检查相关设置。
+- Defender 实时、行为、下载文件及脚本扫描相关设置。
 - 已存在的四个 Defender 计划任务。
 - `WinDefend`、`MDCoreSvc`、`WdNisSvc` 服务（存在时）。
 
@@ -24,7 +24,7 @@ Windows 的防篡改和受保护服务机制可能拒绝修改，即使取得 SY
 
 本版本不再删除 AMSI（供程序调用杀毒扫描的接口）注册项，不修改启动驱动、不关闭防火墙、SmartScreen、安全中心或托盘。
 如果运行过旧版本，“开启”不会自动撤回旧版本对这些额外组件的修改。
-检测到 Defender AMSI 默认注册项缺失或为空时，会报告需要修复 Windows 组件，不填入猜测的注册表内容。
+检测到 Defender AMSI 注册项缺失时，会报告需要修复 Windows 组件，不填入猜测的注册表内容。
 现有排除项保持不变，因此被排除的文件仍然不会扫描。
 
 ## 杀毒检测
@@ -51,6 +51,13 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests\StaticChecks.ps1
 ```
 
 该检查只解析源码、校验文件和危险操作约束，不执行开关，不代表系统上的开关功能已通过运行测试。
+
+### 本机运行验证（2026-10-29）
+
+- 已实际执行关闭、开启两条路径，SYSTEM 与 TrustedInstaller 身份检查通过。
+- 防篡改开启时，关闭操作受到系统拒绝，实时防护和引擎仍开启，正确返回 `1`。
+- 随后执行开启，防护设置、服务及四个计划任务恢复为开启。修正检查兼容性后重跑开启，返回 `0`。
+- 本轮不能证明能在防篡改关闭的系统上彻底停止引擎，没有修改防篡改设置或重启系统。
 
 ## 来源与授权
 

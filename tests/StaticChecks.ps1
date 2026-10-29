@@ -64,6 +64,12 @@ if (@(Get-StateIssues -Disabling $true) -notcontains 'Service still enabled: Win
 $script:active = $true
 $script:serviceStart = 'Automatic'
 if (@(Get-StateIssues -Disabling $false).Count) { throw 'Fully enabled state was rejected' }
+function Get-Item { param($LiteralPath)
+    $item = [pscustomobject]@{}
+    $item | Add-Member ScriptMethod GetValue { param($name) $null }
+    return $item
+}
+if (@(Get-StateIssues -Disabling $false).Count) { throw 'Empty AMSI display name is not proof of damage' }
 $script:missingTask = $true
 if (@(Get-StateIssues -Disabling $false) -notcontains 'Scheduled task missing: Windows Defender Scheduled Scan') {
     throw 'Missing scan task incorrectly reported as restored'

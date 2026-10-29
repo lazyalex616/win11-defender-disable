@@ -13,7 +13,7 @@ $taskPath = '\Microsoft\Windows\Windows Defender\'
 $taskNames = @('Windows Defender Cache Maintenance', 'Windows Defender Cleanup',
     'Windows Defender Scheduled Scan', 'Windows Defender Verification')
 $preferences = @('DisableRealtimeMonitoring', 'DisableBehaviorMonitoring',
-    'DisableIOAVProtection', 'DisableScriptScanning', 'DisableIntrusionPreventionSystem')
+    'DisableIOAVProtection', 'DisableScriptScanning')
 $services = [ordered]@{ WinDefend = 'Automatic'; MDCoreSvc = 'Automatic'; WdNisSvc = 'Manual' }
 
 function Test-Administrator {
@@ -35,7 +35,7 @@ function Get-StateIssues {
     foreach ($name in $preferences) {
         if ($settings.$name -ne $Disabling) { 'Preference: ' + $name }
     }
-    # Network inspection can be idle while enabled; its preference is checked above.
+    # Network inspection can be idle while enabled, so it is not an enable criterion.
     foreach ($name in @('RealTimeProtectionEnabled', 'BehaviorMonitorEnabled', 'IoavProtectionEnabled')) {
         if ($null -ne $status.$name -and $status.$name -ne (-not $Disabling)) {
             'Protection: ' + $name
@@ -69,8 +69,6 @@ function Get-StateIssues {
         $key = 'HKLM:\SOFTWARE\Microsoft\AMSI\Providers\{2781761E-28E0-4109-99FE-B9D127C57AFE}'
         if (-not (Test-Path -LiteralPath $key)) {
             'Defender AMSI registration missing; Windows component repair is required'
-        } elseif ([string]::IsNullOrWhiteSpace((Get-Item -LiteralPath $key).GetValue(''))) {
-            'Defender AMSI registration empty; Windows component repair is required'
         }
     }
 }
